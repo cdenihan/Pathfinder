@@ -85,10 +85,42 @@ def read_int(path: str) -> Optional[int]:
 
 
 def safe_float(v: object, default: float = 0.0) -> float:
+    if isinstance(v, (int, float, str, bytes, bytearray)):
+        try:
+            return float(v)
+        except ValueError:
+            return default
     try:
-        return float(v)  # type: ignore[arg-type]
+        return float(str(v))
     except (TypeError, ValueError):
         return default
+
+
+def cpu_dir_index(path: str) -> int:
+    m = re.search(r"cpu(\d+)$", path)
+    return int(m.group(1)) if m else -1
+
+
+def core_pairs(value: object) -> List[Tuple[object, object]]:
+    if not isinstance(value, list):
+        return []
+    pairs: List[Tuple[object, object]] = []
+    for item in value:
+        if isinstance(item, (tuple, list)) and len(item) == 2:
+            pairs.append((item[0], item[1]))
+    return pairs
+
+
+def named_rate_pairs(value: object) -> List[Tuple[str, Tuple[object, object]]]:
+    if not isinstance(value, dict):
+        return []
+    pairs: List[Tuple[str, Tuple[object, object]]] = []
+    for name, pair in value.items():
+        if not isinstance(name, str):
+            continue
+        if isinstance(pair, (tuple, list)) and len(pair) == 2:
+            pairs.append((name, (pair[0], pair[1])))
+    return pairs
 
 
 def now_string() -> str:
@@ -167,7 +199,7 @@ def read_cpu_freqs() -> Dict[int, Optional[float]]:
     freqs: Dict[int, Optional[float]] = {}
     cpu_dirs = sorted(
         glob.glob("/sys/devices/system/cpu/cpu[0-9]*"),
-        key=lambda p: int(re.search(r"cpu(\d+)$", p).group(1)),
+        key=cpu_dir_index,
     )
     fallback = read_cpuinfo_freqs()
     for path in cpu_dirs:
@@ -533,50 +565,56 @@ class CsvLogger:
                 round(safe_float(x), 3) for x in loadavg
             ]
 
-        for i, core in enumerate(s.get("cores", [])):  # type: ignore[union-attr]
-            pct, mhz = core
+        for i, (pct, mhz) in enumerate(core_pairs(s.get("cores", []))):
             row[f"cpu{i}_pct"] = round(safe_float(pct), 2)
             row[f"cpu{i}_mhz"] = "" if mhz is None else round(safe_float(mhz), 1)
 
         mem = s.get("memory", {})
         if isinstance(mem, dict):
             for key, val in mem.items():
-                row[key] = round(safe_float(val), 2)
+                if isinstance(key, str):
+                    row[key] = round(safe_float(val), 2)
 
         temps = s.get("temps", {})
         if isinstance(temps, dict):
             for key, val in temps.items():
-                row[f"temp_{key}_c"] = round(safe_float(val), 2)
+                if isinstance(key, str):
+                    row[f"temp_{key}_c"] = round(safe_float(val), 2)
 
         power = s.get("power_watts", {})
         if isinstance(power, dict):
             for key, val in power.items():
-                row[f"power_{key}_w"] = round(safe_float(val), 3)
+                if isinstance(key, str):
+                    row[f"power_{key}_w"] = round(safe_float(val), 3)
 
         supplies = s.get("power_supplies", {})
         if isinstance(supplies, dict):
             for name, data in supplies.items():
+                if not isinstance(name, str):
+                    continue
                 if isinstance(data, dict):
-                    if "capacity_pct" in data:
-                        row[f"battery_{name}_pct"] = data["capacity_pct"]
-                    if "watts" in data:
-                        row[f"battery_{name}_w"] = round(safe_float(data["watts"]), 3)
-                    if "status" in data:
-                        row[f"battery_{name}_status"] = data["status"]
+                    cap = data.get("capacity_pct")
+                    watts = data.get("watts")
+                    status = data.get("status")
+                    if cap is not None:
+                        row[f"battery_{name}_pct"] = cap
+                    if watts is not None:
+                        row[f"battery_{name}_w"] = round(safe_float(watts), 3)
+                    if status is not None:
+                        row[f"battery_{name}_status"] = status
 
         for prefix, rates in (
             ("disk", s.get("disk_rates", {})),
             ("net", s.get("net_rates", {})),
         ):
-            if isinstance(rates, dict):
-                for name, pair in rates.items():
-                    rx, tx = pair
-                    if prefix == "disk":
-                        row[f"disk_{name}_read_Bps"] = round(safe_float(rx), 1)
-                        row[f"disk_{name}_write_Bps"] = round(safe_float(tx), 1)
-                    else:
-                        row[f"net_{name}_rx_Bps"] = round(safe_float(rx), 1)
-                        row[f"net_{name}_tx_Bps"] = round(safe_float(tx), 1)
+            for name, pair in named_rate_pairs(rates):
+                rx, tx = pair
+                if prefix == "disk":
+                    row[f"disk_{name}_read_Bps"] = round(safe_float(rx), 1)
+                    row[f"disk_{name}_write_Bps"] = round(safe_float(tx), 1)
+                else:
+                    row[f"net_{name}_rx_Bps"] = round(safe_float(rx), 1)
+                    row[f"net_{name}_tx_Bps"] = round(safe_float(tx), 1)
         return row
 
     def write(self, s: Dict[str, object]) -> None:
@@ -741,6 +779,8 @@ def panel_cpu(
         if ry >= y + h - 5:
             continue
         rx = ix + (i // percol) * col_w
+        if not isinstance(core, (tuple, list)) or len(core) != 2:
+            continue
         pct, mhz = core
         pct = safe_float(pct)
         put(scr, ry, rx, f"cpu{i:<3}", curses.A_BOLD)
@@ -852,6 +892,8 @@ def panel_temps(scr, y: int, x: int, h: int, w: int, s: Dict[str, object]) -> No
     for i, (name, c_obj) in enumerate(
         sorted(temps.items(), key=lambda kv: kv[0].lower())
     ):
+        if not isinstance(name, str):
+            continue
         if iy + i >= y + h - 1:
             break
         c = safe_float(c_obj)
@@ -872,6 +914,8 @@ def panel_power(scr, y: int, x: int, h: int, w: int, s: Dict[str, object]) -> No
         peak = max((safe_float(v) for v in power.values()), default=1.0)
         bw = max(5, iw - 28)
         for name, val in sorted(power.items(), key=lambda kv: kv[0].lower()):
+            if not isinstance(name, str):
+                continue
             if row >= y + h - 1:
                 break
             watts = safe_float(val)
@@ -889,6 +933,8 @@ def panel_power(scr, y: int, x: int, h: int, w: int, s: Dict[str, object]) -> No
             any_rows = True
     if isinstance(supplies, dict) and supplies:
         for name, data in sorted(supplies.items(), key=lambda kv: kv[0].lower()):
+            if not isinstance(name, str):
+                continue
             if row >= y + h - 1:
                 break
             if not isinstance(data, dict):
@@ -938,37 +984,37 @@ def panel_io(scr, y: int, x: int, h: int, w: int, s: Dict[str, object]) -> None:
         put(scr, row, ix + 7 + bw, f" {pct:4.0f}%", xmax=x + w - 1)
         row += 1
     disk_rates = s.get("disk_rates", {})
-    if isinstance(disk_rates, dict):
-        for name, pair in sorted(disk_rates.items())[: max(0, (y + h - 1 - row) // 2)]:
-            if row >= y + h - 1:
-                break
-            rb, wb = pair
-            put(scr, row, ix, f"{name[:10]:<10}", curses.A_BOLD)
-            put(
-                scr,
-                row,
-                ix + 11,
-                f"read {human_rate(safe_float(rb)):<10} write {human_rate(safe_float(wb)):<10}",
-                curses.A_DIM,
-                xmax=x + w - 1,
-            )
-            row += 1
+    for name, pair in sorted(named_rate_pairs(disk_rates))[
+        : max(0, (y + h - 1 - row) // 2)
+    ]:
+        if row >= y + h - 1:
+            break
+        rb, wb = pair
+        put(scr, row, ix, f"{name[:10]:<10}", curses.A_BOLD)
+        put(
+            scr,
+            row,
+            ix + 11,
+            f"read {human_rate(safe_float(rb)):<10} write {human_rate(safe_float(wb)):<10}",
+            curses.A_DIM,
+            xmax=x + w - 1,
+        )
+        row += 1
     net_rates = s.get("net_rates", {})
-    if isinstance(net_rates, dict):
-        for name, pair in sorted(net_rates.items())[: max(0, y + h - 1 - row)]:
-            if row >= y + h - 1:
-                break
-            rx, tx = pair
-            put(scr, row, ix, f"{name[:10]:<10}", curses.A_BOLD)
-            put(
-                scr,
-                row,
-                ix + 11,
-                f"rx {human_rate(safe_float(rx)):<10} tx {human_rate(safe_float(tx)):<10}",
-                curses.A_DIM,
-                xmax=x + w - 1,
-            )
-            row += 1
+    for name, pair in sorted(named_rate_pairs(net_rates))[: max(0, y + h - 1 - row)]:
+        if row >= y + h - 1:
+            break
+        rx, tx = pair
+        put(scr, row, ix, f"{name[:10]:<10}", curses.A_BOLD)
+        put(
+            scr,
+            row,
+            ix + 11,
+            f"rx {human_rate(safe_float(rx)):<10} tx {human_rate(safe_float(tx)):<10}",
+            curses.A_DIM,
+            xmax=x + w - 1,
+        )
+        row += 1
 
 
 def draw_frame(scr, state: State) -> None:
@@ -1006,9 +1052,8 @@ def draw_frame(scr, state: State) -> None:
     panel_cpu(scr, 0, 0, cpu_h, left_w, s, cpu_hist)
     panel_memory(scr, cpu_h, 0, mem_h, left_w, s, mem_hist)
 
-    temps_count = len(
-        s.get("temps", {}) if isinstance(s.get("temps", {}), dict) else {}
-    )
+    temps_obj = s.get("temps", {})
+    temps_count = len(temps_obj) if isinstance(temps_obj, dict) else 0
     top_h = min(max(5, temps_count + 2), max(5, body_h // 3))
     power_h = max(5, body_h // 4)
     io_h = body_h - top_h - power_h
@@ -1050,8 +1095,7 @@ def snapshot_text(s: Dict[str, object]) -> str:
             f"  load average: {loadavg[0]:.2f}, {loadavg[1]:.2f}, {loadavg[2]:.2f}"
         )
     lines.append(f"  cpu avg: {safe_float(s.get('cpu_avg_pct')):.1f}%")
-    for i, core in enumerate(s.get("cores", [])):  # type: ignore[union-attr]
-        pct, mhz = core
+    for i, (pct, mhz) in enumerate(core_pairs(s.get("cores", []))):
         freq = "" if mhz is None else f" @ {safe_float(mhz):.0f} MHz"
         lines.append(f"    cpu{i}: {safe_float(pct):5.1f}%{freq}")
     mem = s.get("memory", {})
@@ -1066,39 +1110,46 @@ def snapshot_text(s: Dict[str, object]) -> str:
     temps = s.get("temps", {})
     if isinstance(temps, dict) and temps:
         for name, c in sorted(temps.items(), key=lambda kv: kv[0].lower())[:20]:
+            if not isinstance(name, str):
+                continue
             lines.append(f"  temp {name}: {safe_float(c):.1f}°C")
     power = s.get("power_watts", {})
     if isinstance(power, dict) and power:
         for name, watts in sorted(power.items(), key=lambda kv: kv[0].lower()):
+            if not isinstance(name, str):
+                continue
             lines.append(f"  power {name}: {safe_float(watts):.2f} W")
     supplies = s.get("power_supplies", {})
     if isinstance(supplies, dict) and supplies:
         for name, data in sorted(supplies.items(), key=lambda kv: kv[0].lower()):
+            if not isinstance(name, str):
+                continue
             if isinstance(data, dict):
                 bits = []
-                if data.get("status"):
-                    bits.append(str(data["status"]))
-                if "capacity_pct" in data:
-                    bits.append(f"{data['capacity_pct']}%")
-                if "watts" in data:
-                    bits.append(f"{safe_float(data['watts']):.2f} W")
+                status = data.get("status")
+                capacity = data.get("capacity_pct")
+                watts = data.get("watts")
+                if status:
+                    bits.append(str(status))
+                if capacity is not None:
+                    bits.append(f"{capacity}%")
+                if watts is not None:
+                    bits.append(f"{safe_float(watts):.2f} W")
                 lines.append(
                     f"  power_supply {name}: " + (", ".join(bits) or "present")
                 )
     disk_rates = s.get("disk_rates", {})
-    if isinstance(disk_rates, dict) and disk_rates:
-        for name, pair in sorted(disk_rates.items())[:10]:
-            rb, wb = pair
-            lines.append(
-                f"  disk {name}: read {human_rate(safe_float(rb))}, write {human_rate(safe_float(wb))}"
-            )
+    for name, pair in sorted(named_rate_pairs(disk_rates))[:10]:
+        rb, wb = pair
+        lines.append(
+            f"  disk {name}: read {human_rate(safe_float(rb))}, write {human_rate(safe_float(wb))}"
+        )
     net_rates = s.get("net_rates", {})
-    if isinstance(net_rates, dict) and net_rates:
-        for name, pair in sorted(net_rates.items())[:10]:
-            rx, tx = pair
-            lines.append(
-                f"  net {name}: rx {human_rate(safe_float(rx))}, tx {human_rate(safe_float(tx))}"
-            )
+    for name, pair in sorted(named_rate_pairs(net_rates))[:10]:
+        rx, tx = pair
+        lines.append(
+            f"  net {name}: rx {human_rate(safe_float(rx))}, tx {human_rate(safe_float(tx))}"
+        )
     return "\n".join(lines)
 
 

@@ -64,7 +64,7 @@ import subprocess
 import sys
 import threading
 from collections import deque
-from typing import Dict, Iterable, List, Optional, TextIO, Tuple
+from typing import Dict, Iterable, List, Optional, TextIO, Tuple, cast
 
 # ---------------------------------------------------------------------------
 # PARSING
@@ -877,7 +877,7 @@ def sudo_prefix(args: argparse.Namespace) -> List[str]:
 
 def acquire_stream(
     args: argparse.Namespace,
-) -> Tuple[TextIO, str, Optional[subprocess.Popen]]:
+) -> Tuple[TextIO, str, Optional[subprocess.Popen[str]]]:
     if args.logfile:
         return open(args.logfile, errors="replace"), f"file:{args.logfile}", None
 
@@ -906,7 +906,7 @@ def acquire_stream(
     if proc.stdout is None:
         sys.exit("failed to capture powermetrics output")
     return (
-        proc.stdout,
+        cast(TextIO, proc.stdout),
         "sudo powermetrics" if cmd[:1] == ["sudo"] else "powermetrics",
         proc,
     )
