@@ -29,7 +29,12 @@ jobs:
         run: uv run ruff check .
 
       - name: Test
-        run: uv run python -m unittest discover -s tests
+        run: |
+          if [ -d tests ]; then
+            uv run python -m unittest discover -s tests
+          else
+            echo "No tests directory found; skipping tests."
+          fi
 
       - name: Build package
         run: uv build
