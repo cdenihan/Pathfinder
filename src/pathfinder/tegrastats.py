@@ -130,18 +130,18 @@ from collections import deque
 # Jetson model / L4T version) simply leave that key out of the stats dict.
 LINE_RE = {
     # "07-07-2026 15:20:47" — timestamp at the start of the line
-    "time":  re.compile(r"^(\d{2}-\d{2}-\d{4}\s+\d{2}:\d{2}:\d{2})"),
+    "time": re.compile(r"^(\d{2}-\d{2}-\d{4}\s+\d{2}:\d{2}:\d{2})"),
     # "RAM 1812/7621MB (lfb 42x4MB)" -> used MB, total MB, largest free block
-    "ram":   re.compile(r"RAM (\d+)/(\d+)MB \(lfb (\S+)\)"),
+    "ram": re.compile(r"RAM (\d+)/(\d+)MB \(lfb (\S+)\)"),
     # "SWAP 0/3810MB (cached 0MB)" -> used MB, total MB, cached MB
-    "swap":  re.compile(r"SWAP (\d+)/(\d+)MB \(cached (\d+)MB\)"),
+    "swap": re.compile(r"SWAP (\d+)/(\d+)MB \(cached (\d+)MB\)"),
     # "CPU [21%@729,28%@729,off,...]" -> raw comma-separated core list,
     # individual cores are split out with CORE_RE below
-    "cpu":   re.compile(r"CPU \[([^\]]+)\]"),
+    "cpu": re.compile(r"CPU \[([^\]]+)\]"),
     # "GR3D_FREQ 0%" or "GR3D_FREQ 15%@612" -> load %, optional MHz
-    "gpu":   re.compile(r"GR3D_FREQ (\d+)%(?:@(\d+))?"),
+    "gpu": re.compile(r"GR3D_FREQ (\d+)%(?:@(\d+))?"),
     # "cpu@45.25C", "tj@45.625C", ... -> findall() grabs every sensor
-    "temp":  re.compile(r"(\w+)@([\d.]+)C"),
+    "temp": re.compile(r"(\w+)@([\d.]+)C"),
     # "VDD_IN 3560mW/3806mW" -> rail name, current mW, average mW
     "power": re.compile(r"(VDD_\w+) (\d+)mW/(\d+)mW"),
 }
@@ -195,8 +195,9 @@ def parse_line(line):
     # findall() sweeps the whole line so every sensor/rail present is captured,
     # regardless of which Jetson model produced the output.
     stats["temps"] = {name: float(v) for name, v in LINE_RE["temp"].findall(line)}
-    stats["power"] = {name: (int(cur), int(avg))
-                      for name, cur, avg in LINE_RE["power"].findall(line)}
+    stats["power"] = {
+        name: (int(cur), int(avg)) for name, cur, avg in LINE_RE["power"].findall(line)
+    }
     return stats
 
 
@@ -216,7 +217,7 @@ class CsvLogger:
 
     def __init__(self, path):
         self.file = open(path, "w", newline="")
-        self.writer = None                    # created on the first sample
+        self.writer = None  # created on the first sample
 
     @staticmethod
     def flatten(s):
@@ -229,7 +230,7 @@ class CsvLogger:
         row = {"timestamp": s.get("time", "")}
         online = []
         for i, core in enumerate(s["cores"]):
-            if core is None:                  # offline core -> empty cells
+            if core is None:  # offline core -> empty cells
                 row[f"cpu{i}_pct"] = row[f"cpu{i}_mhz"] = ""
             else:
                 row[f"cpu{i}_pct"], row[f"cpu{i}_mhz"] = core
@@ -238,8 +239,9 @@ class CsvLogger:
         if "ram" in s:
             row["ram_used_mb"], row["ram_total_mb"], row["ram_lfb"] = s["ram"]
         if "swap" in s:
-            (row["swap_used_mb"], row["swap_total_mb"],
-             row["swap_cached_mb"]) = s["swap"]
+            (row["swap_used_mb"], row["swap_total_mb"], row["swap_cached_mb"]) = s[
+                "swap"
+            ]
         if "gpu" in s:
             pct, freq = s["gpu"]
             row["gpu_pct"] = pct
@@ -253,12 +255,13 @@ class CsvLogger:
 
     def write(self, s):
         row = self.flatten(s)
-        if self.writer is None:               # first sample defines the header
-            self.writer = csv.DictWriter(self.file, fieldnames=list(row),
-                                         restval="", extrasaction="ignore")
+        if self.writer is None:  # first sample defines the header
+            self.writer = csv.DictWriter(
+                self.file, fieldnames=list(row), restval="", extrasaction="ignore"
+            )
             self.writer.writeheader()
         self.writer.writerow(row)
-        self.file.flush()                     # survive Ctrl+C / crashes
+        self.file.flush()  # survive Ctrl+C / crashes
 
     def close(self):
         try:
@@ -275,10 +278,10 @@ class State:
 
     def __init__(self):
         self.lock = threading.Lock()
-        self.latest = None                    # most recent parsed stats dict
-        self.cpu_hist = deque(maxlen=1024)    # CPU average %, one per sample
-        self.gpu_hist = deque(maxlen=1024)    # GPU load %, one per sample
-        self.eof = False                      # input stream finished/died
+        self.latest = None  # most recent parsed stats dict
+        self.cpu_hist = deque(maxlen=1024)  # CPU average %, one per sample
+        self.gpu_hist = deque(maxlen=1024)  # GPU load %, one per sample
+        self.eof = False  # input stream finished/died
 
 
 def reader_thread(stream, state, logger=None):
@@ -318,7 +321,7 @@ BLOCKS = " ▁▂▃▄▅▆▇█"
 
 def init_colors():
     curses.start_color()
-    curses.use_default_colors()               # -1 = terminal default background
+    curses.use_default_colors()  # -1 = terminal default background
     curses.init_pair(GREEN, curses.COLOR_GREEN, -1)
     curses.init_pair(YELLOW, curses.COLOR_YELLOW, -1)
     curses.init_pair(RED, curses.COLOR_RED, -1)
@@ -401,7 +404,7 @@ def draw_graph(scr, y, x, h, w, hist):
         return
     vals = list(hist)[-w:]
     for col, v in enumerate(vals):
-        cx = x + w - len(vals) + col          # right-align: newest at right
+        cx = x + w - len(vals) + col  # right-align: newest at right
         eighths = max(0, min(100, v)) / 100 * h * 8
         full, part = int(eighths // 8), int(eighths % 8)
         a = load_attr(v)
@@ -417,16 +420,17 @@ def draw_graph(scr, y, x, h, w, hist):
 # Each panel gets a rectangle (y, x, h, w) and draws its box + contents inside
 # it. The layout in draw_frame() decides the rectangles from the screen size.
 
+
 def panel_cpu(scr, y, x, h, w, s, hist):
     draw_box(scr, y, x, h, w, "CPU")
     cores = s["cores"]
-    iy, ix, iw = y + 1, x + 2, w - 4          # interior with 1-col padding
+    iy, ix, iw = y + 1, x + 2, w - 4  # interior with 1-col padding
     rows_avail = h - 2
 
     # Fit the core gauges: 1 column normally, 2 columns when there are more
     # cores than rows (leaving at least 3 rows for the history graph).
     ncols = 1 if len(cores) + 1 <= rows_avail - 3 else 2
-    percol = -(-len(cores) // ncols)          # ceil division
+    percol = -(-len(cores) // ncols)  # ceil division
     col_w = iw // ncols
     # label "coreN " + " 100%" + " @9999MHz" ≈ 22 chars of non-bar text
     bw = max(5, col_w - 22)
@@ -441,8 +445,7 @@ def panel_cpu(scr, y, x, h, w, s, hist):
             pct, freq = core
             draw_gauge(scr, ry, rx + 7, bw, pct)
             put(scr, ry, rx + 7 + bw, f" {pct:3d}%", xmax=x + w - 1)
-            put(scr, ry, rx + 7 + bw + 5, f" @{freq}MHz", curses.A_DIM,
-                xmax=x + w - 1)
+            put(scr, ry, rx + 7 + bw + 5, f" @{freq}MHz", curses.A_DIM, xmax=x + w - 1)
 
     online = [c[0] for c in cores if c]
     avg = sum(online) / max(1, len(online))
@@ -468,8 +471,7 @@ def panel_gpu(scr, y, x, h, w, s, hist):
     draw_gauge(scr, iy, ix + 7, bw, pct)
     put(scr, iy, ix + 7 + bw, f" {pct:3d}%", xmax=x + w - 1)
     if freq:
-        put(scr, iy, ix + 7 + bw + 5, f" @{freq}MHz", curses.A_DIM,
-            xmax=x + w - 1)
+        put(scr, iy, ix + 7 + bw + 5, f" @{freq}MHz", curses.A_DIM, xmax=x + w - 1)
     gh = y + h - 1 - (iy + 1)
     if gh >= 1:
         draw_graph(scr, iy + 1, ix, gh, iw, hist)
@@ -485,18 +487,28 @@ def panel_mem(scr, y, x, h, w, s):
         pct = used / total * 100
         put(scr, row, ix, "RAM   ", curses.A_BOLD)
         draw_gauge(scr, row, ix + 6, bw, pct)
-        put(scr, row + 1, ix + 6,
-            f"{used}/{total} MB ({pct:.0f}%)   lfb {lfb}", curses.A_DIM,
-            xmax=x + w - 1)
+        put(
+            scr,
+            row + 1,
+            ix + 6,
+            f"{used}/{total} MB ({pct:.0f}%)   lfb {lfb}",
+            curses.A_DIM,
+            xmax=x + w - 1,
+        )
         row += 2
     if "swap" in s:
         used, total, cached = s["swap"]
-        pct = used / total * 100 if total else 0   # guard: swap may be 0 MB
+        pct = used / total * 100 if total else 0  # guard: swap may be 0 MB
         put(scr, row, ix, "SWAP  ", curses.A_BOLD)
         draw_gauge(scr, row, ix + 6, bw, pct)
-        put(scr, row + 1, ix + 6,
+        put(
+            scr,
+            row + 1,
+            ix + 6,
             f"{used}/{total} MB ({pct:.0f}%)   cached {cached} MB",
-            curses.A_DIM, xmax=x + w - 1)
+            curses.A_DIM,
+            xmax=x + w - 1,
+        )
 
 
 def panel_temps(scr, y, x, h, w, s):
@@ -506,11 +518,10 @@ def panel_temps(scr, y, x, h, w, s):
     bw = max(5, iw - 18)
     for i, (name, c) in enumerate(sorted(s.get("temps", {}).items())):
         if iy + i >= y + h - 1:
-            break                              # more sensors than rows: clip
+            break  # more sensors than rows: clip
         put(scr, iy + i, ix, f"{name:<6}", curses.A_BOLD)
         draw_gauge(scr, iy + i, ix + 7, bw, c, attr=temp_attr(c))
-        put(scr, iy + i, ix + 7 + bw, f" {c:5.1f}°C", temp_attr(c),
-            xmax=x + w - 1)
+        put(scr, iy + i, ix + 7 + bw, f" {c:5.1f}°C", temp_attr(c), xmax=x + w - 1)
 
 
 def panel_power(scr, y, x, h, w, s):
@@ -524,11 +535,18 @@ def panel_power(scr, y, x, h, w, s):
         if iy + i >= y + h - 1:
             break
         put(scr, iy + i, ix, f"{name:<15}", curses.A_BOLD)
-        draw_gauge(scr, iy + i, ix + 16, bw, cur / peak * 100,
-                   attr=curses.color_pair(GREEN))
+        draw_gauge(
+            scr, iy + i, ix + 16, bw, cur / peak * 100, attr=curses.color_pair(GREEN)
+        )
         put(scr, iy + i, ix + 16 + bw, f" {cur:5d} mW", xmax=x + w - 1)
-        put(scr, iy + i, ix + 16 + bw + 9, f" avg {pavg} mW", curses.A_DIM,
-            xmax=x + w - 1)
+        put(
+            scr,
+            iy + i,
+            ix + 16 + bw + 9,
+            f" avg {pavg} mW",
+            curses.A_DIM,
+            xmax=x + w - 1,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -557,18 +575,22 @@ def draw_frame(scr, state, source_label):
         gpu_hist = list(state.gpu_hist)
 
     if s is None:
-        put(scr, H // 2, max(0, W // 2 - 12), "waiting for tegrastats...",
-            curses.A_DIM)
+        put(scr, H // 2, max(0, W // 2 - 12), "waiting for tegrastats...", curses.A_DIM)
         scr.refresh()
         return
 
     if H < 16 or W < 70:
-        put(scr, 0, 0, f"terminal too small ({W}x{H}), need at least 70x16",
-            curses.color_pair(RED))
+        put(
+            scr,
+            0,
+            0,
+            f"terminal too small ({W}x{H}), need at least 70x16",
+            curses.color_pair(RED),
+        )
         scr.refresh()
         return
 
-    body_h = H - 1                             # last row is the footer
+    body_h = H - 1  # last row is the footer
     left_w = max(46, int(W * 0.58))
     right_w = W - left_w
     rx = left_w
@@ -583,8 +605,9 @@ def draw_frame(scr, state, source_label):
     mem_h = 6
     ntemps = len(s.get("temps", {}))
     npower = len(s.get("power", {}))
-    temp_h = min(ntemps + 2, max(3, (body_h - mem_h) * ntemps
-                                 // max(1, ntemps + npower)))
+    temp_h = min(
+        ntemps + 2, max(3, (body_h - mem_h) * ntemps // max(1, ntemps + npower))
+    )
     power_h = body_h - mem_h - temp_h
     panel_mem(scr, 0, rx, mem_h, right_w, s)
     panel_temps(scr, mem_h, rx, temp_h, right_w, s)
@@ -601,13 +624,13 @@ def tui(scr, state, source_label):
     """Curses main loop: poll keyboard, redraw ~5x/s, exit on q/Esc/EOF."""
     curses.curs_set(0)
     init_colors()
-    scr.timeout(200)                           # getch() doubles as frame timer
+    scr.timeout(200)  # getch() doubles as frame timer
     while True:
         ch = scr.getch()
-        if ch in (ord("q"), ord("Q"), 27):     # 27 = Esc
+        if ch in (ord("q"), ord("Q"), 27):  # 27 = Esc
             break
         draw_frame(scr, state, source_label)
-        if state.eof:                          # stream died: last frame, leave
+        if state.eof:  # stream died: last frame, leave
             break
 
 
@@ -617,13 +640,21 @@ def tui(scr, state, source_label):
 def parse_args():
     p = argparse.ArgumentParser(
         description="btop-style TUI (and CSV exporter) for NVIDIA Jetson "
-                    "tegrastats. See the module docstring for full docs.")
-    p.add_argument("logfile", nargs="?",
-                   help="replay a saved tegrastats text log instead of live "
-                        "data (prints a plain snapshot, no TUI)")
-    p.add_argument("--log", metavar="FILE.csv", dest="csv_path",
-                   help="export every parsed sample (all fields) to this CSV "
-                        "file during the run; rows are flushed as they arrive")
+        "tegrastats. See the module docstring for full docs."
+    )
+    p.add_argument(
+        "logfile",
+        nargs="?",
+        help="replay a saved tegrastats text log instead of live "
+        "data (prints a plain snapshot, no TUI)",
+    )
+    p.add_argument(
+        "--log",
+        metavar="FILE.csv",
+        dest="csv_path",
+        help="export every parsed sample (all fields) to this CSV "
+        "file during the run; rows are flushed as they arrive",
+    )
     return p.parse_args()
 
 
@@ -653,11 +684,14 @@ def acquire_stream(args):
 
     # Run interactively with no pipe: launch tegrastats ourselves.
     try:
-        proc = subprocess.Popen(["tegrastats"], stdout=subprocess.PIPE,
-                                stderr=subprocess.DEVNULL, text=True)
+        proc = subprocess.Popen(
+            ["tegrastats"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True
+        )
     except FileNotFoundError:
-        sys.exit("tegrastats not found — run on a Jetson, or pipe input:\n"
-                 "  sudo tegrastats | python3 tegrastats_viewer.py")
+        sys.exit(
+            "tegrastats not found — run on a Jetson, or pipe input:\n"
+            "  sudo tegrastats | python3 tegrastats_viewer.py"
+        )
     return proc.stdout, "tegrastats (spawned)", proc
 
 
@@ -680,8 +714,10 @@ def snapshot(stream, logger=None):
     online = [c[0] for c in last["cores"] if c]
     avg = sum(online) / max(1, len(online))
     for i, core in enumerate(last["cores"]):
-        print(f"  core{i}: " + ("offline" if core is None
-                                else f"{core[0]:3d}% @ {core[1]} MHz"))
+        print(
+            f"  core{i}: "
+            + ("offline" if core is None else f"{core[0]:3d}% @ {core[1]} MHz")
+        )
     print(f"  cpu avg: {avg:.0f}%")
     if "gpu" in last:
         pct, freq = last["gpu"]
@@ -715,16 +751,17 @@ def main():
         return
 
     state = State()
-    t = threading.Thread(target=reader_thread, args=(stream, state, logger),
-                         daemon=True)
+    t = threading.Thread(
+        target=reader_thread, args=(stream, state, logger), daemon=True
+    )
     t.start()
 
     try:
-        curses.wrapper(tui, state, label)      # wrapper restores the terminal
+        curses.wrapper(tui, state, label)  # wrapper restores the terminal
     except KeyboardInterrupt:
-        pass                                   # Ctrl+C is a normal way to quit
+        pass  # Ctrl+C is a normal way to quit
     finally:
-        if proc:                               # stop a tegrastats we spawned
+        if proc:  # stop a tegrastats we spawned
             proc.terminate()
         try:
             stream.close()
